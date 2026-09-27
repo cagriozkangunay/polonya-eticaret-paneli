@@ -7,9 +7,8 @@ st.set_page_config(page_title="Polonya E-Ticaret Paneli", layout="wide", page_ic
 PROD_FILE = "urunler.csv"
 SALES_FILE = "satislar.csv"
 
-# Varsayılan şablon verileri
+# Varsayılan şablon verileri (Yoksa sıfırdan oluşturur)
 if not os.path.exists(PROD_FILE):
-    # 20 Islak Mendil, 20 Oda Kokusu, 20 Kozmetik hazır şablonu
     rows = []
     for i in range(1, 21):
         rows.append({"SKU": f"IM-{i:03d}", "Ürün Adı": f"Islak Mendil Çeşit {i}", "Kategori": "Islak Mendil", "Alış Fiyatı (PLN)": 0.0, "Satış Fiyatı (PLN)": 0.0, "Stok": 0})
@@ -104,10 +103,11 @@ with tab2:
             df_p.to_csv(PROD_FILE, index=False)
             st.success(f"Satış Kaydedildi! Net Kar: {net_kar:.2f} PLN | Kalan Stok: {prod_info['Stok'] - adet}")
 
-# TAB 3: FİNANS PANELSİ
+# TAB 3: FİNANS VE SATIŞ SİLME PANELSİ
 with tab3:
     st.header("Finansal Analiz & Polonya Çeyreklik Limit Göstergesi")
     df_s = pd.read_csv(SALES_FILE)
+    df_p = pd.read_csv(PROD_FILE)
     
     toplam_ciro = df_s["Satış Fiyatı (PLN)"].sum() if not df_s.empty else 0.0
     toplam_kar = df_s["Net Kar (PLN)"].sum() if not df_s.empty else 0.0
@@ -122,5 +122,41 @@ with tab3:
     
     st.progress(min(toplam_ciro / limit, 1.0), text=f"Yasal Ciro Limiti Kullanım Oranı: %{(toplam_ciro/limit)*100:.1f}")
     
-    st.subheader("Geçmiş Satış Hareketleri")
-    st.dataframe(df_s, use_container_width=True)
+    st.divider()
+    st.subheader("Geçmiş Satış Kayıtları ve Satış İptali / Silme")
+    
+    if df_s.empty:
+        st.info("Henüz kaydedilmiş bir satış bulunmuyor.")
+    else:
+        st.dataframe(df_s, use_container_width=True)
+        
+        st.write("---")
+        st.subheader("🗑️ Deneme / Hatalı Satış Silme")
+        
+        # Silinecek satırı seçme listesi
+        satis_listesi = [
+            f"Satır {idx} | Tarih: {row['Tarih']} | Ürün: {row['SKU']} ({row['Ürün Adı']}) | Adet: {row['Adet']} | Tutar: {row['Satış Fiyatı (PLN)']} PLN"
+            for idx, row in df_s.iterrows()
+        ]
+        
+        silinecek_satis = st.selectbox("Silmek İstediğiniz Satışı Seçin:", satis_listesi)
+        
+        if st.button("Seçilen Satışı Sil ve Stoğu İade Et", type="primary"):
+            secilen_index = int(silinecek_satis.split(" | ")[0].replace("Satır ", ""))
+            
+            # Silinecek kaydın stok bilgisini al
+            silinen_row = df_s.iloc[secilen_index]
+            silinen_sku = silinen_row["SKU"]
+            silinen_adet = silinen_row["Adet"]
+            
+            # 1. Satışı listeden çıkar
+            df_s = df_s.drop(secilen_index).reset_index(drop=True)
+            df_s.to_csv(SALES_FILE, index=False)
+            
+            # 2. Düşülen stoğu ürüne geri iade et
+            if silinen_sku in df_p["SKU"].values:
+                df_p.loc[df_p["SKU"] == silinen_sku, "Stok"] += silinen_adet
+                df_p.to_csv(PROD_FILE, index=False)
+            
+            st.success("Satış kaydı başarıyla silindi ve stok tekrar güncellendi!")
+            st.rerun()
